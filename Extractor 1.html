@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JSON Data Filter</title>
+    <style>
+        /* General styles */
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+            background-color: #f7f9fc;
+            color: #333;
+        }
+
+        h1 {
+            text-align: center;
+            margin-top: 20px;
+            color: #5a5a5a;
+        }
+
+        /* Container styling */
+        .container {
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+            background: #fff;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+        }
+
+        /* Input and textarea styles */
+        textarea, input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 14px;
+            resize: none;
+        }
+
+        input {
+            height: 40px;
+        }
+
+        textarea#jsonOutput {
+            height: 300px;
+        }
+
+        /* Button styling */
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            margin: 10px 5px 0 0;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s ease;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+
+        /* Table styling */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        th, td {
+            border: 1px solid #ddd;
+            text-align: left;
+            padding: 8px;
+        }
+
+        th {
+            background-color: #007bff;
+            color: white;
+        }
+
+        td {
+            background-color: #f9f9f9;
+        }
+
+        /* Copy buttons container */
+        .button-container {
+            margin-top: 10px;
+            text-align: center;
+        }
+
+        .button-container button {
+            margin: 0 10px;
+            padding: 10px 20px;
+            font-size: 14px;
+        }
+
+        /* Message for no data */
+        .no-data {
+            text-align: center;
+            color: #999;
+            margin-top: 10px;
+            font-style: italic;
+        }
+
+        /* Hidden class to hide elements */
+        .hidden {
+            display: none !important;
+        }
+
+        /* Responsive design */
+        @media (max-width: 600px) {
+            .container {
+                padding: 10px;
+            }
+
+            button {
+                width: 100%;
+                margin: 10px 0;
+            }
+
+            .button-container button {
+                width: 100%;
+                margin: 10px 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>Kibana Logs JSON Data Filter</h1>
+    <div class="container">
+        <textarea id="jsonInput" placeholder="Enter your JSON data here..."></textarea>
+        <input type="text" id="filterField" placeholder="Enter the fields to filter (e.g., log_id, msg-id)...">
+        <button onclick="filterData()">Filter Data</button>
+        <button onclick="toggleVisualization()" class="hidden" id="visualizeBtn">Visualize Data</button>
+
+        <!-- Buttons for copying data - Moved here -->
+        <div class="button-container hidden" id="copyButtons">
+            <button onclick="copyData('single')">Copy (OR-separated)</button>
+            <button onclick="copyData('commaSeparated')">Copy (Comma-separated)</button>
+        </div>
+
+        <!-- Textarea for default output -->
+        <textarea id="jsonOutput" placeholder="Filtered output will be displayed here..."></textarea>
+
+        <!-- Table container for visualization -->
+        <div id="tableContainer" class="hidden"></div>
+
+    </div>
+
+    <script>
+        let filteredDataCache = []; // Store the filtered data globally for visualization
+        let isTableVisible = false; // Track whether the table is currently visible
+        const jsonOutput = document.getElementById('jsonOutput');
+        const tableContainer = document.getElementById('tableContainer');
+        const visualizeBtn = document.getElementById('visualizeBtn');
+
+
+        function filterData() {
+            const jsonData = document.getElementById('jsonInput').value;
+            const filterFields = document.getElementById('filterField').value.split(',').map(field => field.trim());
+            let data;
+            try {
+                data = JSON.parse(jsonData);
+            } catch (e) {
+                alert('Invalid JSON data');
+                return;
+            }
+            const values = Object.values(data);
+            const result = getFieldsJson(values);
+            const filteredData = getFilteredData(result, filterFields);
+
+            // Cache the filtered data for visualization
+            filteredDataCache = filteredData;
+
+            // Display filtered data in the textarea by default and show textarea, hide table
+            jsonOutput.value = JSON.stringify(filteredData, null, 2);
+            jsonOutput.classList.remove('hidden');
+            tableContainer.classList.add('hidden');
+            visualizeBtn.textContent = 'Visualize Data';
+            isTableVisible = false;
+
+
+            // Show the "Visualize Data" button
+            visualizeBtn.classList.remove('hidden');
+
+
+            // Check if only one field is being filtered
+            if (filterFields.length === 1) {
+                // Show copy buttons for single-field search
+                document.getElementById('copyButtons').classList.remove('hidden');
+            } else {
+                // Hide copy buttons for multi-field search
+                document.getElementById('copyButtons').classList.add('hidden');
+            }
+        }
+
+        function getFieldsJson(dataArray) {
+            return dataArray.map(item => {
+                if (item.hits && item.hits.hits) {
+                    return item.hits.hits.map(hit => hit.fields.json);
+                } else {
+                    return []; // Return an empty array if hits are undefined
+                }
+            });
+        }
+
+        function getFilteredData(dataArray, fields) {
+            const filteredResults = [];
+            dataArray.forEach(item => {
+                item.forEach(subItem => {
+                    subItem.forEach(record => {
+                        const filteredRecord = {};
+                        fields.forEach(field => {
+                            const fieldParts = field.split('.');
+                            let value = record;
+                            for (const part of fieldParts) {
+                                value = value ? value[part] : undefined;
+                                if (value === undefined) break;
+                            }
+                            if (value !== undefined) {
+                                filteredRecord[field] = value;
+                            }
+                        });
+                        if (Object.keys(filteredRecord).length > 0) {
+                            filteredResults.push(filteredRecord);
+                        }
+                    });
+                });
+            });
+            return filteredResults;
+        }
+
+        function toggleVisualization() {
+
+
+            if (isTableVisible) {
+                // Show textarea, hide table
+                tableContainer.classList.add('hidden');
+                jsonOutput.classList.remove('hidden');
+                visualizeBtn.textContent = 'Visualize Data';
+            } else {
+                // Generate and show the table, hide textarea
+                generateTable(filteredDataCache);
+                tableContainer.classList.remove('hidden');
+                jsonOutput.classList.add('hidden');
+                visualizeBtn.textContent = 'View Raw Data';
+            }
+
+            // Toggle the visibility state
+            isTableVisible = !isTableVisible;
+        }
+
+        function generateTable(data) {
+            const tableContainer = document.getElementById('tableContainer');
+            if (data.length === 0) {
+                tableContainer.innerHTML = '<p class="no-data">No data found for the specified fields.</p>';
+                return;
+            }
+
+            // Collect all unique fields from all objects
+            const allFields = new Set();
+            data.forEach(row => {
+                Object.keys(row).forEach(key => allFields.add(key));
+            });
+            const fields = Array.from(allFields);
+
+
+            // Clear any existing table
+            tableContainer.innerHTML = '';
+
+
+            // Create table and header row
+            const table = document.createElement('table');
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+
+            // Add header columns
+            fields.forEach(field => {
+                const th = document.createElement('th');
+                th.textContent = field;
+                headerRow.appendChild(th);
+            });
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+
+            // Create table body
+            const tbody = document.createElement('tbody');
+            data.forEach(row => {
+                const tr = document.createElement('tr');
+                fields.forEach(field => {
+                    const td = document.createElement('td');
+                    // Check if the field exists in the current row, otherwise display empty string
+                    td.textContent = row.hasOwnProperty(field) ? row[field] : '';
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+
+            // Append table to the container
+            tableContainer.appendChild(table);
+        }
+
+        function copyData(format) {
+            if (filteredDataCache.length === 0) {
+                alert('No data available to copy.');
+                return;
+            }
+
+            const singleField = Object.keys(filteredDataCache[0] || [])[0]; // Get the single field
+            const values = filteredDataCache.map(item => item[singleField]);
+
+            let dataToCopy = '';
+            if (format === 'single') {
+                // Format with "or" between values
+                dataToCopy = values.map(value => `"${value}"`).join(' or ');
+            } else if (format === 'commaSeparated') {
+                // Format as comma-separated values
+                dataToCopy = values.map(value => `"${value}"`).join(', ');
+            }
+
+            // Copy the data to clipboard
+            navigator.clipboard.writeText(dataToCopy).then(() => {
+                alert('Data copied to clipboard!');
+            }).catch(err => {
+                alert('Failed to copy data: ' + err);
+            });
+        }
+    </script>
+</body>
+</html>
